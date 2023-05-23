@@ -11,7 +11,7 @@
 void doit(int fd);
 void read_requesthdrs(rio_t *rp);
 int parse_uri(char *uri, char *filename, char *cgiargs);
-void serve_static(int fd, char *filename, int filesize);
+void serve_static(int fd, char *filename, int filesize, char *date);
 void get_filetype(char *filename, char *filetype);
 void serve_dynamic(int fd, char *filename, char *cgiargs);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
@@ -64,13 +64,13 @@ void doit(int fd)
         clienterror(fd, method, "501", "Not implemented", "Tiny does not implement this method");
         return;
     }
+    // 필요한 헤더: If-Modified-Since: <date>
     read_requesthdrs(&rio);
 
     /* Parse URI from GET request */
     is_static = parse_uri(uri, filename, cgiargs);
     if (stat(filename, &sbuf) < 0)
     {
-        printf("?\n");
         clienterror(fd, filename, "404", "Not found", "Tiny couldn't find this file");
         return;
     }
@@ -82,7 +82,8 @@ void doit(int fd)
             clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't read the file");
             return;
         }
-        serve_static(fd, filename, sbuf.st_size);
+        // 마지막: 파일 수정 날짜.
+        serve_static(fd, filename, sbuf.st_size, ctime(&sbuf.st_ctime));
     }
     else
     { /* Serve dunamic content */
@@ -159,7 +160,7 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
     }
 }
 
-void serve_static(int fd, char *filename, int filesize)
+void serve_static(int fd, char *filename, int filesize, char *date)
 {
     int srcfd;
     char *srcp, filetype[MAXLINE], buf[MAXBUF];
@@ -171,7 +172,8 @@ void serve_static(int fd, char *filename, int filesize)
     sprintf(buf, "%sServer: Tiny Web SErver\r\n", buf);
     sprintf(buf, "%sConnection: close\r\n", buf);
     sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
-    sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, filetype);
+    sprintf(buf, "%sContent-type: %s\r\n", buf, filetype);
+    sprintf(buf, "%sDate: %s\r\n\r\n", buf, date);
     Rio_writen(fd, buf, strlen(buf));
     printf("Response headers:\n");
     printf("%s", buf);
