@@ -1,9 +1,11 @@
 #include "csapp.h"
+#include <pthread.h>
 #include <stdio.h>
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
+#define NTHREADS 20
 
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr =
@@ -20,10 +22,23 @@ void request_upstream(int fd, char *uri, char *port, char *filename);
 void read_responsehdrs(rio_t *rp, char *data);
 void serve_upstreamfile(int fd, char *filename, int filesize);
 
+pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t notfull = PTHREAD_COND_INITIALIZER;
+pthread_cond_t notempty = PTHREAD_COND_INITIALIZER;
+int in, out, count;
+
+int buffer[1024];
+const int capacity = 1024;
+
+void put(int fd);
+int take();
+void *thread(void *vargp);
+
 int main(int argc, char **argv)
 {
     int listenfd, connfd;
     char hostname[MAXLINE], port[MAXLINE];
+    pthread_t tid[NTHREADS];
     socklen_t clientlen;
     struct sockaddr_storage clientaddr;
 
@@ -35,6 +50,10 @@ int main(int argc, char **argv)
     }
 
     listenfd = Open_listenfd(argv[1]);
+
+    for (int i = 0; i < NTHREADS; ++i) /* Create worker threads */
+        Pthread_create(&tid[i], NULL, thread, NULL);
+
     while (1)
     {
         clientlen = sizeof(clientaddr);
@@ -43,8 +62,7 @@ int main(int argc, char **argv)
         Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE,
                     0);
         printf("Accepted connection from (%s, %s)\n", hostname, port);
-        doit(connfd);  // line:netp:tiny:doit
-        Close(connfd); // line:netp:tiny:close
+        put(connfd);
     }
 }
 
@@ -222,12 +240,11 @@ void request_upstream(int fd, char *host, char *port, char *filename)
     read_responsehdrs(&rio, date);
     // 이제부터 본문
     // 계속 read 하면서 파일에 쓰기
-    printf("??\n");
     strcpy(fname, ".");
     strcat(fname, filename);
     printf("fname: %s\n", fname);
     FILE *fp = fopen(fname, "w");
-    Rio_readlineb(&rio, body, MAXLINE);
+    // Rio_readlineb(&rio, body, MAXLINE);
     while ((n = Rio_readlineb(&rio, body, MAXLINE)) > 0)
     {
         // 바디 데이터 처리 로직
@@ -263,6 +280,7 @@ void read_responsehdrs(rio_t *rp, char *date)
 
 void serve_upstreamfile(int fd, char *filename, int filesize)
 {
+    printf("filename:?? %s\n", filename);
     int srcfd;
     char *srcp, filetype[MAXLINE], buf[MAXBUF];
     get_filetype(filename, filetype);
@@ -280,4 +298,43 @@ void serve_upstreamfile(int fd, char *filename, int filesize)
     Close(srcfd);
     Rio_writen(fd, srcp, filesize);
     Munmap(srcp, filesize);
+}
+
+void put(int fd)
+{
+    // buffer 요소와 count에 대한 락
+    pthread_mutex_lock(&m);
+    while (count == capacity)
+        pthread_cond_wait(&notfull, &m);
+    buffer[in] = fd;
+    in = (in + 1) % capacity;
+    count++;
+    pthread_cond_signal(&notempty);
+    pthread_mutex_unlock(&m);
+}
+
+int take()
+{
+    int data;
+    pthread_mutex_lock(&m);
+    while (count == 0)
+        pthread_cond_wait(&notempty, &m);
+    data = buffer[out];
+    out = (out + 1) % capacity;
+    count--;
+
+    pthread_cond_signal(&notfull);
+    pthread_mutex_unlock(&m);
+    return data;
+}
+
+void *thread(void *vargp)
+{
+    Pthread_detach(pthread_self());
+    for (;;)
+    {
+        int connfd = take();
+        doit(connfd);
+        Close(connfd); // line:netp:tiny:close
+    }
 }

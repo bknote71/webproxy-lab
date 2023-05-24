@@ -171,14 +171,15 @@ void serve_static(int fd, char *filename, int filesize, char *date)
     sprintf(buf, "HTTP/1.0 200 OK\r\n");
     sprintf(buf, "%sServer: Tiny Web SErver\r\n", buf);
     sprintf(buf, "%sConnection: close\r\n", buf);
+    // sprintf(buf, "%sDate: %s\r\n", buf, date);
     sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
-    sprintf(buf, "%sContent-type: %s\r\n", buf, filetype);
-    sprintf(buf, "%sDate: %s\r\n\r\n", buf, date);
+    sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, filetype);
     Rio_writen(fd, buf, strlen(buf));
     printf("Response headers:\n");
     printf("%s", buf);
 
     /* Send response body to client */
+    printf("filename: %s\n", filename);
     srcfd = Open(filename, O_RDONLY, 0);
     srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
     Close(srcfd);
